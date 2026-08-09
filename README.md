@@ -103,22 +103,6 @@ Scan barcodes, serve multiple customers at once, bill in seconds, accept UPI, an
 
 ---
 
-## 📱 Screenshots
-
-<div align="center">
-
-| Dashboard | Stock | Selling |
-|:---:|:---:|:---:|
-| <img src="screenshots/dashboard.png" width="200" /> | <img src="screenshots/stock.png" width="200" /> | <img src="screenshots/selling.png" width="200" /> |
-
-| Payment QR | History | Settings |
-|:---:|:---:|:---:|
-| <img src="screenshots/payment-qr.png" width="200" /> | <img src="screenshots/history.png" width="200" /> | <img src="screenshots/settings.png" width="200" /> |
-
-</div>
-
----
-
 ## 🛠 Tech Stack
 
 | Layer | Technology | Why |
