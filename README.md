@@ -215,23 +215,23 @@ All data lives in one localStorage key — `datapharm:v1`:
 {
   "products": [{
     "id": "uuid",
-    "name": "Paracetamol 500mg",
+    "name": "Vicodin",
     "category": "Tablet",
-    "location": "Shelf A",
-    "barcode": "8901234567890",
-    "supplier": "MedLine Pharma",
-    "price": 18,
+    "location": "Shelf H",
+    "barcode": "842634600177",
+    "supplier": "Dr Gregory House",
+    "price": 1500,
     "strips": 10,
-    "tabletsPerStrip": 10,
-    "expiry": "2026-08"
+    "tabletsPerStrip": 30,
+    "expiry": "2004-11"
   }],
   "sales": [{
     "id": "uuid",
     "ts": 1722765432000,
-    "items": [{ "name": "Paracetamol 500mg", "qty": 2, "unit": "strip", "price": 18 }],
+    "items": [{ "name": "Vicodin", "qty": 2, "unit": "strip", "price": 30 }],
     "discountPct": 10,
-    "total": 32.40,
-    "buyer": { "name": "Ramesh Kumar", "phone": "9999999999" }
+    "total": 54,
+    "buyer": { "name": "James Wilson", "phone": "(609) 555-0200" }
   }],
   "stockIns": [{ "id": "uuid", "ts": 1722765432000, "productId": "uuid", "strips": 5 }],
   "settings": {
