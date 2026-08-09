@@ -107,7 +107,7 @@ Scan barcodes, serve multiple customers at once, bill in seconds, accept UPI, an
 
 <div align="center">
 
- <img src="screenshots/house.png" width="200" /> 
+ <img src="screenshots\house.png" /> 
 
 </div>
 
