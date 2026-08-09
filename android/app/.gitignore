@@ -1,0 +1,5 @@
+/build/*
+!/build/.npmkeep
+
+# Release signing keystore — DO NOT commit or lose. Needed to update the app.
+datapharm-release.keystore
