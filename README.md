@@ -103,16 +103,6 @@ Scan barcodes, serve multiple customers at once, bill in seconds, accept UPI, an
 
 ---
 
-## 📱 Screenshots
-
-<div align="center">
-
- <img src="screenshots\house.png" /> 
-
-</div>
-
----
-
 ## 🛠 Tech Stack
 
 | Layer | Technology | Why |
