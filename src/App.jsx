@@ -417,17 +417,33 @@ export default function App() {
     document.body.style.backgroundColor = theme === 'light' ? '#F9F6F0' : '#0D1117';
 
     if (!Capacitor.isNativePlatform()) return;
-    try {
-      BarcodeScanner.installGoogleBarcodeScannerModule().catch(() => {});
-      StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {});
-      if (theme === 'light') {
-        StatusBar.setBackgroundColor({ color: '#F9F6F0' }).catch(() => {});
-        StatusBar.setStyle({ style: Style.Light }).catch(() => {});
-      } else {
-        StatusBar.setBackgroundColor({ color: '#0D1117' }).catch(() => {});
-        StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
-      }
-    } catch (e) {}
+
+    BarcodeScanner.installGoogleBarcodeScannerModule().catch(() => {});
+
+    const applyStatusBar = async () => {
+      try {
+        await StatusBar.setOverlaysWebView({ overlay: false });
+        if (theme === 'light') {
+          await StatusBar.setBackgroundColor({ color: '#F9F6F0' });
+          await StatusBar.setStyle({ style: Style.Dark }); // Light background -> dark icons
+        } else {
+          await StatusBar.setBackgroundColor({ color: '#0D1117' });
+          await StatusBar.setStyle({ style: Style.Light }); // Dark background -> light icons
+        }
+      } catch (e) {}
+    };
+
+    // Apply immediately, and retry after native splash window dismisses (350ms, 700ms, 1200ms)
+    applyStatusBar();
+    const t1 = setTimeout(applyStatusBar, 350);
+    const t2 = setTimeout(applyStatusBar, 700);
+    const t3 = setTimeout(applyStatusBar, 1200);
+
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+    };
   }, [theme]);
 
   return (

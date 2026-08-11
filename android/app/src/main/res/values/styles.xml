@@ -14,11 +14,8 @@
         <item name="windowNoTitle">true</item>
         <item name="android:background">#0D1117</item>
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
-        <!-- Dedicated status bar background color for clear separation -->
-        <item name="android:statusBarColor">#161C24</item>
-        <item name="android:navigationBarColor">#161C24</item>
-        <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:statusBarColor">#0D1117</item>
+        <item name="android:navigationBarColor">#0D1117</item>
     </style>
 
 
@@ -30,7 +27,5 @@
         <item name="android:background">#0D1117</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:windowLightStatusBar">false</item>
-        <item name="android:windowLightNavigationBar">true</item>
     </style>
 </resources>
