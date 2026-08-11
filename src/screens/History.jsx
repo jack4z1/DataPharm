@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { buildPdf, buildDocx, buildCsv, buildJson, deliver } from '../lib/export.js';
-import { IconDoc, IconTable, IconCode, IconShare, IconDownload, IconChevronDown, IconBoxAdd, IconClock, IconReceipt } from '../components/Icons.jsx';
+import { buildPdf, buildDocx, buildCsv, buildJson, buildSingleSalePdf, buildSingleSaleDocx, buildSingleSaleCsv, buildSingleSaleJson, deliver, preloadExportLibraries } from '../lib/export.js';
+import { IconDoc, IconTable, IconCode, IconShare, IconDownload, IconChevronDown, IconBoxAdd, IconClock, IconReceipt, IconPrinter } from '../components/Icons.jsx';
 import { money } from '../lib/pricing.js';
+import { printSaleReceipt } from '../lib/print.js';
+import { isRealPrinter } from '../lib/store.js';
 import Sheet from '../components/Sheet.jsx';
 
 const EXPORTS = [
@@ -17,8 +19,42 @@ export default function History({ db, notify }) {
   const [open, setOpen] = useState(null);
   const [busy, setBusy] = useState(null);
   const [pending, setPending] = useState(null); // built export awaiting Save/Share choice
+  const [pendingSale, setPendingSale] = useState(null); // single sale format picker
   const cur = db.settings.currency;
   const isNative = Capacitor.isNativePlatform();
+
+  useEffect(() => {
+    // Pre-warm export tools in background after History screen renders
+    preloadExportLibraries();
+  }, []);
+
+  const runSingleSaleExport = async (sale, kind) => {
+    setBusy(kind);
+    try {
+      const stamp = new Date(sale.ts || Date.now()).toISOString().slice(0, 10);
+      let blob, file;
+      if (kind === 'pdf') {
+        blob = buildSingleSalePdf(sale, db.settings);
+        file = `receipt-${stamp}.pdf`;
+      } else if (kind === 'docx') {
+        blob = await buildSingleSaleDocx(sale, db.settings);
+        file = `receipt-${stamp}.docx`;
+      } else if (kind === 'csv') {
+        blob = buildSingleSaleCsv(sale, db.settings);
+        file = `receipt-${stamp}.csv`;
+      } else {
+        blob = buildSingleSaleJson(sale, db.settings);
+        file = `receipt-${stamp}.json`;
+      }
+      setPending({ kind, file, blob });
+    } catch (err) {
+      console.error(err);
+      notify('Could not format receipt export', 'err');
+    } finally {
+      setBusy(null);
+      setPendingSale(null);
+    }
+  };
 
   const entries = useMemo(
     () =>
@@ -244,6 +280,39 @@ export default function History({ db, notify }) {
                             <span>Total</span>
                             <b>{money(e.sale.total, cur)}</b>
                           </span>
+
+                          <div className="sale-action-bar" style={{ display: 'flex', gap: 6, marginTop: 10, paddingTop: 8, borderTop: '1px dashed var(--border)' }} onClick={(ev) => ev.stopPropagation()}>
+                            <button
+                              className="btn secondary sm"
+                              style={{ flex: 1 }}
+                              onClick={() => {
+                                printSaleReceipt(e.sale, db.settings);
+                                const conn = db.settings.printerConfig?.connectedPrinter;
+                                const connected = isRealPrinter(conn) ? conn : null;
+                                if (connected) {
+                                  notify(`Printing... 🖨️`);
+                                } else {
+                                  notify('Not connected to a printer 🖨️', 'warn');
+                                }
+                              }}
+                            >
+                              <IconPrinter size={15} /> Print
+                            </button>
+                            <button
+                              className="btn secondary sm"
+                              style={{ flex: 1 }}
+                              onClick={() => setPendingSale({ sale: e.sale, mode: 'share' })}
+                            >
+                              <IconShare size={15} /> Share
+                            </button>
+                            <button
+                              className="btn secondary sm"
+                              style={{ flex: 1 }}
+                              onClick={() => setPendingSale({ sale: e.sale, mode: 'save' })}
+                            >
+                              <IconDownload size={15} /> Save
+                            </button>
+                          </div>
                         </span>
                       )}
                     </div>
@@ -254,6 +323,28 @@ export default function History({ db, notify }) {
           ))}
         </div>
       )}
+
+      <Sheet open={!!pendingSale} onClose={() => setPendingSale(null)} title={pendingSale?.mode === 'share' ? 'Share sale receipt' : 'Save sale receipt'}>
+        {pendingSale && (
+          <div className="export-picker" style={{ padding: '8px 0' }}>
+            <p className="picker-file" style={{ marginBottom: 12 }}>Choose format to {pendingSale.mode}:</p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <button className="btn secondary big" onClick={() => runSingleSaleExport(pendingSale.sale, 'pdf')} disabled={!!busy}>
+                <IconDoc size={18} /> PDF
+              </button>
+              <button className="btn secondary big" onClick={() => runSingleSaleExport(pendingSale.sale, 'docx')} disabled={!!busy}>
+                <IconDoc size={18} /> Word
+              </button>
+              <button className="btn secondary big" onClick={() => runSingleSaleExport(pendingSale.sale, 'csv')} disabled={!!busy}>
+                <IconTable size={18} /> CSV
+              </button>
+              <button className="btn secondary big" onClick={() => runSingleSaleExport(pendingSale.sale, 'json')} disabled={!!busy}>
+                <IconCode size={18} /> JSON
+              </button>
+            </div>
+          </div>
+        )}
+      </Sheet>
     </div>
   );
 }

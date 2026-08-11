@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import { StatusBar, Style } from '@capacitor/status-bar';
+import { SplashScreen } from '@capacitor/splash-screen';
 import { loadDB, persist, clearDB, uid } from './lib/store.js';
 import { lineTotal, unitPrice, round2, money } from './lib/pricing.js';
 import { triggerBack } from './lib/back.js';
@@ -17,7 +18,7 @@ import SellingPanel from './components/SellingPanel.jsx';
 import PermissionDialog from './components/PermissionDialog.jsx';
 import LockScreen from './components/LockScreen.jsx';
 import SyncEngine from './lib/sync.js';
-import { IconHome, IconBox, IconClock, IconGear, IconCheck, IconArrowLeft } from './components/Icons.jsx';
+import { IconHome, IconBox, IconClock, IconGear, IconCheck, IconArrowLeft, IconAlertTriangle, IconXCircle } from './components/Icons.jsx';
 
 const TABS = [
   { id: 'dash', label: 'Home', icon: IconHome },
@@ -141,8 +142,6 @@ export default function App() {
   };
 
   const [toasts, setToasts] = useState([]);
-  const [splash, setSplash] = useState(true);
-  const [splashOut, setSplashOut] = useState(false);
   const [edgeP, setEdgeP] = useState(0); // 0..1 left-edge swipe progress (iOS-style back hint)
   const [permAsk, setPermAsk] = useState(null); // { title, message, onRetry } permission-denied dialog
   const touch = useRef(null);
@@ -150,11 +149,23 @@ export default function App() {
   const syncEngineRef = useRef(null);
 
   useEffect(() => {
-    syncEngineRef.current = new SyncEngine(
-      (msg, tone) => notify(msg, tone),
-      (newDb) => setDb(newDb)
-    );
+    if (Capacitor.isNativePlatform()) {
+      const timer = setTimeout(() => {
+        SplashScreen.hide().catch(() => {});
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      syncEngineRef.current = new SyncEngine(
+        (msg, tone) => notify(msg, tone),
+        (newDb) => setDb(newDb)
+      );
+    }, 800);
     return () => {
+      clearTimeout(timer);
       if (syncEngineRef.current) {
         syncEngineRef.current.stop();
       }
@@ -167,16 +178,6 @@ export default function App() {
       syncEngineRef.current.onLocalUpdate(db);
     }
   }, [db]);
-
-  // Flash splash screen: logo fades in, then the whole layer fades out.
-  useEffect(() => {
-    const t1 = setTimeout(() => setSplashOut(true), 1250);
-    const t2 = setTimeout(() => setSplash(false), 1750);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
-  }, []);
 
   const notify = (msg, tone = 'ok') => {
     const id = uid();
@@ -420,10 +421,10 @@ export default function App() {
       BarcodeScanner.installGoogleBarcodeScannerModule().catch(() => {});
       StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {});
       if (theme === 'light') {
-        StatusBar.setBackgroundColor({ color: '#EAE3D9' }).catch(() => {});
+        StatusBar.setBackgroundColor({ color: '#F9F6F0' }).catch(() => {});
         StatusBar.setStyle({ style: Style.Light }).catch(() => {});
       } else {
-        StatusBar.setBackgroundColor({ color: '#161C24' }).catch(() => {});
+        StatusBar.setBackgroundColor({ color: '#0D1117' }).catch(() => {});
         StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
       }
     } catch (e) {}
@@ -510,8 +511,14 @@ export default function App() {
 
       <div className="toasts">
         {toasts.map((t) => (
-          <div key={t.id} className={`toast ${t.tone}`}>
-            <IconCheck size={15} />
+          <div key={t.id} className={`toast ${t.tone || ''}`}>
+            {t.tone === 'err' ? (
+              <IconXCircle size={16} />
+            ) : t.tone === 'warn' ? (
+              <IconAlertTriangle size={16} />
+            ) : (
+              <IconCheck size={16} />
+            )}
             {t.msg}
           </div>
         ))}
@@ -543,11 +550,6 @@ export default function App() {
         </div>
       )}
 
-      {splash && (
-        <div className={`splash ${splashOut ? 'out' : ''}`}>
-          <img src={logoUrl} alt="DataPharm" />
-        </div>
-      )}
     </div>
   );
 }

@@ -1,22 +1,33 @@
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Share } from '@capacitor/share';
 import { Filesystem, Directory } from '@capacitor/filesystem';
-import {
-  Document,
-  Packer,
-  Paragraph,
-  TextRun,
-  Table,
-  TableRow,
-  TableCell,
-  HeadingLevel,
-  AlignmentType,
-  WidthType,
-  BorderStyle,
-} from 'docx';
 import { stockParts, round2, money } from './pricing.js';
+
+let pdfCache = null;
+let docxCache = null;
+
+export async function loadPdfEngine() {
+  if (pdfCache) return pdfCache;
+  const [{ jsPDF }, autoTableModule] = await Promise.all([
+    import('jspdf'),
+    import('jspdf-autotable'),
+  ]);
+  const autoTable = autoTableModule.default || autoTableModule;
+  pdfCache = { jsPDF, autoTable };
+  return pdfCache;
+}
+
+export async function loadDocxEngine() {
+  if (docxCache) return docxCache;
+  const docx = await import('docx');
+  docxCache = docx;
+  return docxCache;
+}
+
+export function preloadExportLibraries() {
+  loadPdfEngine().catch(() => {});
+  loadDocxEngine().catch(() => {});
+}
 
 /**
  * Native bridge (registered in MainActivity) that opens Android's "Save to…"
@@ -26,23 +37,55 @@ const FileSaver = registerPlugin('FileSaver', {
   web: () => ({ saveFile: async () => ({ status: 'unsupported' }) }),
 });
 
+export function getShopHeaderLines(settings) {
+  const shop = (settings && settings.shopDetails) || {};
+  const name = shop.name || 'DataPharm Pharmacy';
+  const address = shop.address || '';
+  const phone = shop.phone || '';
+  const email = shop.email || '';
+
+  const lines = [name];
+  if (address) lines.push(`Address: ${address}`);
+  const contact = [];
+  if (phone) contact.push(`Ph: ${phone}`);
+  if (email) contact.push(`Email: ${email}`);
+  if (contact.length) lines.push(contact.join(' | '));
+  return lines;
+}
+
 /* ---------------- PDF ---------------- */
 
-export function buildPdf(db) {
+export async function buildPdf(db) {
+  const { jsPDF, autoTable } = await loadPdfEngine();
   const cur = db.settings.currency === '₹' ? 'Rs. ' : db.settings.currency;
   const doc = new jsPDF();
-  doc.setFontSize(18);
-  doc.setTextColor(13, 71, 170);
-  doc.text('DataPharm Report', 14, 18);
-  doc.setFontSize(10);
-  doc.setTextColor(90, 90, 90);
-  doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 25);
+  const shopLines = getShopHeaderLines(db.settings);
 
-  doc.setFontSize(13);
+  doc.setFontSize(16);
+  doc.setTextColor(13, 71, 170);
+  doc.text(shopLines[0], 14, 16);
+  
+  let headerY = 22;
+  doc.setFontSize(9);
+  doc.setTextColor(80, 80, 80);
+  for (let i = 1; i < shopLines.length; i++) {
+    doc.text(shopLines[i], 14, headerY);
+    headerY += 5;
+  }
+  
+  doc.setFontSize(14);
+  doc.setTextColor(13, 71, 170);
+  doc.text('DataPharm Inventory & Sales Report', 14, headerY + 4);
+  doc.setFontSize(9);
+  doc.setTextColor(100, 100, 100);
+  doc.text(`Generated: ${new Date().toLocaleString()}`, 14, headerY + 10);
+
+  const startY = headerY + 18;
+  doc.setFontSize(12);
   doc.setTextColor(20, 20, 20);
-  doc.text('Products in stock', 14, 34);
+  doc.text('Products in stock', 14, startY - 3);
   autoTable(doc, {
-    startY: 37,
+    startY,
     head: [['Name', 'Location', 'Buy from', 'Expiry', 'Price/strip', 'Tabs/strip', 'Stock']],
     body: db.products.map((p) => {
       const s = stockParts(p);
@@ -92,6 +135,71 @@ export function buildPdf(db) {
   return doc.output('blob');
 }
 
+export async function buildSingleSalePdf(sale, settings) {
+  const { jsPDF, autoTable } = await loadPdfEngine();
+  const cur = (settings && settings.currency === '₹') ? 'Rs. ' : ((settings && settings.currency) || '₹');
+  const doc = new jsPDF();
+  const shopLines = getShopHeaderLines(settings);
+
+  doc.setFontSize(16);
+  doc.setTextColor(13, 71, 170);
+  doc.text(shopLines[0], 14, 16);
+
+  let headerY = 22;
+  doc.setFontSize(9);
+  doc.setTextColor(80, 80, 80);
+  for (let i = 1; i < shopLines.length; i++) {
+    doc.text(shopLines[i], 14, headerY);
+    headerY += 5;
+  }
+
+  doc.setFontSize(14);
+  doc.setTextColor(13, 71, 170);
+  doc.text('Sale Receipt', 14, headerY + 4);
+  doc.setFontSize(9);
+  doc.setTextColor(100, 100, 100);
+  doc.text(`Date: ${new Date(sale.ts || Date.now()).toLocaleString()}`, 14, headerY + 10);
+
+  if (sale.buyer && (sale.buyer.name || sale.buyer.phone || sale.buyer.address)) {
+    doc.setTextColor(30, 30, 30);
+    const bParts = [sale.buyer.name, sale.buyer.phone, sale.buyer.address].filter(Boolean).join(' · ');
+    doc.text(`Customer: ${bParts}`, 14, headerY + 16);
+    headerY += 6;
+  }
+
+  const startY = headerY + 14;
+  autoTable(doc, {
+    startY,
+    head: [['Item Name', 'Qty / Unit', 'Unit Price', 'Total']],
+    body: (sale.items || []).map((i) => [
+      i.name,
+      `${i.qty} ${i.unit === 'strip' ? 'strip' : 'tab'}`,
+      cur + i.unitPrice,
+      cur + i.line,
+    ]),
+    headStyles: { fillColor: [13, 71, 170], fontSize: 9 },
+    styles: { fontSize: 9, cellPadding: 3 },
+    theme: 'grid',
+  });
+
+  let y = doc.lastAutoTable.finalY + 8;
+  if (sale.subtotal) {
+    doc.setFontSize(10);
+    doc.text(`Subtotal: ${cur}${sale.subtotal}`, 14, y);
+    y += 5;
+  }
+  if (sale.discount) {
+    doc.setFontSize(10);
+    doc.text(`Discount (${sale.discountPct || 0}%): -${cur}${sale.discount}`, 14, y);
+    y += 5;
+  }
+
+  doc.setFontSize(12);
+  doc.setTextColor(13, 71, 170);
+  doc.text(`Grand Total: ${money(sale.total, cur)}`, 14, y + 2);
+  return doc.output('blob');
+}
+
 /* ---------------- Buyer info ---------------- */
 
 /** Pretty-printed buyer line for a sale, or '—' when there is none. */
@@ -104,36 +212,53 @@ function buyerLabel(sale) {
 
 /* ---------------- DOCX ---------------- */
 
-const side = { style: BorderStyle.SINGLE, size: 1, color: 'CCCCCC' };
-const BORDERS = { top: side, bottom: side, left: side, right: side };
-
-function cell(text, { head = false, align = AlignmentType.LEFT } = {}) {
-  return new TableCell({
-    borders: BORDERS,
-    shading: head ? { fill: 'E3EDFB' } : undefined,
-    children: [
-      new Paragraph({
-        alignment: align,
-        children: [new TextRun({ text: String(text ?? ''), bold: head, size: 18 })],
-      }),
-    ],
-  });
-}
-
-function row(values, opts) {
-  return new TableRow({ children: values.map((v) => cell(v, opts)) });
-}
-
 export async function buildDocx(db) {
+  const docx = await loadDocxEngine();
+  const {
+    Document,
+    Packer,
+    Paragraph,
+    TextRun,
+    Table,
+    TableRow,
+    TableCell,
+    HeadingLevel,
+    AlignmentType,
+    WidthType,
+    BorderStyle,
+  } = docx;
+
+  const side = { style: BorderStyle.SINGLE, size: 1, color: 'CCCCCC' };
+  const BORDERS = { top: side, bottom: side, left: side, right: side };
+
+  function cell(text, { head = false, align = AlignmentType.LEFT } = {}) {
+    return new TableCell({
+      borders: BORDERS,
+      shading: head ? { fill: 'E3EDFB' } : undefined,
+      children: [
+        new Paragraph({
+          alignment: align,
+          children: [new TextRun({ text: String(text ?? ''), bold: head, size: 18 })],
+        }),
+      ],
+    });
+  }
+
+  function row(values, opts) {
+    return new TableRow({ children: values.map((v) => cell(v, opts)) });
+  }
+
   const cur = db.settings.currency;
+  const shopLines = getShopHeaderLines(db.settings);
   const children = [
     new Paragraph({
       heading: HeadingLevel.TITLE,
-      children: [new TextRun({ text: 'DataPharm Report', color: '0D47AA' })],
+      children: [new TextRun({ text: shopLines[0], color: '0D47AA' })],
     }),
+    ...shopLines.slice(1).map((l) => new Paragraph({ children: [new TextRun({ text: l, color: '555555' })] })),
     new Paragraph({
-      spacing: { after: 240 },
-      children: [new TextRun({ text: 'Generated: ' + new Date().toLocaleString() })],
+      spacing: { before: 120, after: 240 },
+      children: [new TextRun({ text: 'DataPharm Report · Generated: ' + new Date().toLocaleString() })],
     }),
     new Paragraph({ heading: HeadingLevel.HEADING_2, children: [new TextRun('Products in stock')] }),
   ];
@@ -202,12 +327,96 @@ export async function buildDocx(db) {
   return await Packer.toBlob(doc);
 }
 
+export async function buildSingleSaleDocx(sale, settings) {
+  const docx = await loadDocxEngine();
+  const {
+    Document,
+    Packer,
+    Paragraph,
+    TextRun,
+    Table,
+    TableRow,
+    TableCell,
+    HeadingLevel,
+    AlignmentType,
+    WidthType,
+    BorderStyle,
+  } = docx;
+
+  const side = { style: BorderStyle.SINGLE, size: 1, color: 'CCCCCC' };
+  const BORDERS = { top: side, bottom: side, left: side, right: side };
+
+  function cell(text, { head = false, align = AlignmentType.LEFT } = {}) {
+    return new TableCell({
+      borders: BORDERS,
+      shading: head ? { fill: 'E3EDFB' } : undefined,
+      children: [
+        new Paragraph({
+          alignment: align,
+          children: [new TextRun({ text: String(text ?? ''), bold: head, size: 18 })],
+        }),
+      ],
+    });
+  }
+
+  function row(values, opts) {
+    return new TableRow({ children: values.map((v) => cell(v, opts)) });
+  }
+
+  const cur = (settings && settings.currency) || '₹';
+  const shopLines = getShopHeaderLines(settings);
+  const children = [
+    new Paragraph({
+      heading: HeadingLevel.TITLE,
+      children: [new TextRun({ text: shopLines[0], color: '0D47AA' })],
+    }),
+    ...shopLines.slice(1).map((l) => new Paragraph({ children: [new TextRun({ text: l, color: '555555' })] })),
+    new Paragraph({
+      spacing: { before: 120, after: 200 },
+      children: [new TextRun({ text: 'Sale Receipt · Date: ' + new Date(sale.ts || Date.now()).toLocaleString() })],
+    }),
+  ];
+
+  if (sale.buyer && (sale.buyer.name || sale.buyer.phone || sale.buyer.address)) {
+    const bStr = [sale.buyer.name, sale.buyer.phone, sale.buyer.address].filter(Boolean).join(' · ');
+    children.push(new Paragraph({ spacing: { after: 150 }, children: [new TextRun({ text: `Customer: ${bStr}`, bold: true })] }));
+  }
+
+  children.push(
+    new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: [
+        row(['Item', 'Qty / Unit', 'Unit Price', 'Total'], { head: true }),
+        ...(sale.items || []).map((i) => row([i.name, `${i.qty} ${i.unit}`, cur + i.unitPrice, cur + i.line])),
+      ],
+    })
+  );
+
+  children.push(
+    new Paragraph({
+      spacing: { before: 200 },
+      children: [
+        new TextRun({
+          text: `Grand Total: ${money(sale.total, cur)}`,
+          bold: true,
+          size: 24,
+          color: '0D47AA',
+        }),
+      ],
+    })
+  );
+
+  const doc = new Document({ sections: [{ children }] });
+  return await Packer.toBlob(doc);
+}
+
 /* ---------------- CSV ---------------- */
 
 export function buildCsv(db) {
   const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const shopLines = getShopHeaderLines(db.settings);
   const lines = [];
-  lines.push('DataPharm Export');
+  shopLines.forEach((l) => lines.push(esc(l)));
   lines.push(`Generated,${esc(new Date().toLocaleString())}`);
   lines.push('');
   lines.push('PRODUCTS');
@@ -235,10 +444,41 @@ export function buildCsv(db) {
   return new Blob([lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
 }
 
+export function buildSingleSaleCsv(sale, settings) {
+  const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const shopLines = getShopHeaderLines(settings);
+  const lines = [];
+  shopLines.forEach((l) => lines.push(esc(l)));
+  lines.push(`Receipt Date,${esc(new Date(sale.ts || Date.now()).toLocaleString())}`);
+  if (sale.buyer) lines.push(`Buyer,${esc(buyerLabel(sale))}`);
+  lines.push('');
+  lines.push(['Item Name', 'Qty', 'Unit', 'Unit Price', 'Line Total'].map(esc).join(','));
+  (sale.items || []).forEach((i) => {
+    lines.push([i.name, i.qty, i.unit, i.unitPrice, i.line].map(esc).join(','));
+  });
+  lines.push('');
+  lines.push(`Subtotal,${sale.subtotal || sale.total}`);
+  lines.push(`Discount,${sale.discount || 0}`);
+  lines.push(`Grand Total,${sale.total}`);
+  return new Blob([lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+}
+
 /* ---------------- JSON ---------------- */
 
 export function buildJson(db) {
-  return new Blob([JSON.stringify(db, null, 2)], { type: 'application/json' });
+  const data = {
+    shopDetails: db.settings.shopDetails || {},
+    ...db
+  };
+  return new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+}
+
+export function buildSingleSaleJson(sale, settings) {
+  const data = {
+    shopDetails: (settings && settings.shopDetails) || {},
+    sale
+  };
+  return new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
 }
 
 /* ---------------- Share / download ---------------- */

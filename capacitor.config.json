@@ -8,6 +8,13 @@
       "style": "DARK",
       "backgroundColor": "#161C24"
     },
+    "SplashScreen": {
+      "launchShowDuration": 3000,
+      "launchAutoHide": false,
+      "backgroundColor": "#0D1117",
+      "showSpinner": false,
+      "androidScaleType": "CENTER_CROP"
+    },
     "BarcodeScanner": {
       "scanningLibrary": "mlkit"
     }

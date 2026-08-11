@@ -87,7 +87,7 @@ export default function Stock({ db, addProduct, updateProduct, removeProduct, ad
             const oos = p.strips <= 0;
             const low = !oos && p.strips < 2;
             return (
-              <button key={p.id} className={`stock-row ${low ? 'low' : ''} ${oos ? 'out' : ''}`} onClick={() => setDetail(p)}>
+              <button key={p.id} className={`stock-row ${low ? 'low' : ''} ${oos ? 'out' : ''} ${detail && detail.id === p.id ? 'sel' : ''}`} onClick={() => setDetail(p)}>
                 <span className="stock-main">
                   <b>{p.name}</b>
                   <span className="meta">

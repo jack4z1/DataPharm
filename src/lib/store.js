@@ -9,7 +9,16 @@ export const uid = () =>
 
 const DEFAULT_CATEGORIES = ['Tablet', 'Capsule', 'Syrup', 'Injection', 'Ointment', 'Drops', 'Powder', 'Other'];
 
-const DEFAULT_SETTINGS = { currency: '₹', qrImage: '', fontSize: 'md', theme: 'dark', onlineMode: false, notifications: { ...NOTIF_DEFAULTS } };
+const DEFAULT_SETTINGS = {
+  currency: '₹',
+  qrImage: '',
+  fontSize: 'md',
+  theme: 'dark',
+  onlineMode: false,
+  shopDetails: { name: '', phone: '', address: '', email: '' },
+  printerConfig: { connectedPrinter: null, pairedPrinters: [] },
+  notifications: { ...NOTIF_DEFAULTS },
+};
 
 export function fresh() {
   return {
@@ -73,6 +82,15 @@ function demoData() {
   return { products, sales, stockIns: [], categories: [...DEFAULT_CATEGORIES], settings: { ...DEFAULT_SETTINGS }, tombstones: [], syncConfig: { shopId: '', role: '', deviceId: uid(), deviceName: '', syncToken: '', expiryTime: '', dailyVerification: false, status: 'active', workers: [] } };
 }
 
+export function isRealPrinter(p) {
+  if (!p || typeof p !== 'object') return false;
+  const name = String(p.name || '').toLowerCase();
+  const id = String(p.id || '').toLowerCase();
+  const DUMMIES = ['bt-pos58', 'wifi-star', 'wifi-epson', 'pos-58', 'star tsp100', 'epson tm-t20iii'];
+  if (DUMMIES.some((d) => id.includes(d) || name.includes(d))) return false;
+  return true;
+}
+
 export function loadDB() {
   try {
     const raw = localStorage.getItem(KEY);
@@ -82,6 +100,19 @@ export function loadDB() {
     }
     const d = JSON.parse(raw);
     const fr = fresh();
+    const loadedSettings = {
+      ...DEFAULT_SETTINGS,
+      ...(d.settings || {}),
+      notifications: { ...NOTIF_DEFAULTS, ...((d.settings && d.settings.notifications) || {}) }
+    };
+    if (loadedSettings.printerConfig) {
+      const conn = loadedSettings.printerConfig.connectedPrinter;
+      const paired = loadedSettings.printerConfig.pairedPrinters || [];
+      loadedSettings.printerConfig = {
+        connectedPrinter: isRealPrinter(conn) ? conn : null,
+        pairedPrinters: Array.isArray(paired) ? paired.filter(isRealPrinter) : [],
+      };
+    }
     return {
       ...fr,
       ...d,
@@ -89,7 +120,7 @@ export function loadDB() {
       sales: d.sales || [],
       stockIns: d.stockIns || [],
       categories: Array.isArray(d.categories) ? d.categories : [...DEFAULT_CATEGORIES],
-      settings: { ...DEFAULT_SETTINGS, ...(d.settings || {}), notifications: { ...NOTIF_DEFAULTS, ...((d.settings && d.settings.notifications) || {}) } },
+      settings: loadedSettings,
       notifLog: { low: {}, expiring: {}, ...((d && d.notifLog) || {}) },
       tombstones: d.tombstones || [],
       syncConfig: { ...fr.syncConfig, ...(d.syncConfig || {}) }

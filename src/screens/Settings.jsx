@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { Html5QrcodeScanner } from 'html5-qrcode';
-import { IconImage, IconTrash, IconAlert, IconBell, IconPlus, IconMinus, IconGear } from '../components/Icons.jsx';
+import { IconImage, IconTrash, IconAlert, IconBell, IconPlus, IconMinus, IconGear, IconPrinter, IconBluetooth } from '../components/Icons.jsx';
 import { ensureNotificationPermission, NOTIF_DEFAULTS } from '../lib/notifications.js';
 import { uid } from '../lib/store.js';
+import { printTestReceipt } from '../lib/print.js';
 
 const NOTIF_TYPES = [
   { key: 'lowStock', label: 'Low stock', desc: 'When a product drops below 2 strips' },
@@ -71,6 +72,66 @@ export default function Settings({ db, setSettings, clearAll, notify, notifyEven
   const theme = db.settings.theme || 'dark';
   const qrImage = db.settings.qrImage || '';
   const notifs = { ...NOTIF_DEFAULTS, ...(db.settings.notifications || {}) };
+
+  const shopDetails = db.settings.shopDetails || { name: '', phone: '', address: '', email: '' };
+  const DUMMY_IDS = ['bt-pos58', 'wifi-star', 'wifi-epson', 'POS-58 Thermal Printer', 'Star TSP100 Network Printer', 'Epson TM-T20III'];
+  const isRealPrinter = (p) => p && p.id && !DUMMY_IDS.includes(p.id) && !DUMMY_IDS.includes(p.name);
+
+  const rawConfig = db.settings.printerConfig || {};
+  const cleanConnected = isRealPrinter(rawConfig.connectedPrinter) ? rawConfig.connectedPrinter : null;
+  const cleanPaired = (rawConfig.pairedPrinters || []).filter(isRealPrinter);
+  const printerConfig = { connectedPrinter: cleanConnected, pairedPrinters: cleanPaired };
+
+  const [shopName, setShopName] = useState(shopDetails.name || '');
+  const [shopPhone, setShopPhone] = useState(shopDetails.phone || '');
+  const [shopAddress, setShopAddress] = useState(shopDetails.address || '');
+  const [shopEmail, setShopEmail] = useState(shopDetails.email || '');
+
+  const [scanningPrinter, setScanningPrinter] = useState(false);
+  const [discoveredPrinters, setDiscoveredPrinters] = useState(printerConfig.pairedPrinters);
+
+  const saveShopDetails = (updates) => {
+    const next = { ...shopDetails, ...updates };
+    setSettings({ shopDetails: next });
+  };
+
+  const handleScanPrinters = async () => {
+    setScanningPrinter(true);
+    notify('Scanning for printers...');
+
+    try {
+      if (typeof navigator !== 'undefined' && navigator.bluetooth) {
+        const device = await navigator.bluetooth.requestDevice({
+          acceptAllDevices: true,
+          optionalServices: ['00001101-0000-1000-8000-00805f9b34fb']
+        });
+        if (device) {
+          const printer = { id: device.id, name: device.name || 'Wireless Receipt Printer', type: 'Bluetooth' };
+          const updatedPrinters = [printer, ...discoveredPrinters.filter(p => p.id !== printer.id)];
+          setDiscoveredPrinters(updatedPrinters);
+          setSettings({
+            printerConfig: {
+              connectedPrinter: printer,
+              pairedPrinters: updatedPrinters
+            }
+          });
+          notify(`Connected to ${printer.name}`);
+        }
+      } else {
+        notify('No printer found. Make sure your printer is turned on and connected via Bluetooth or Wi-Fi', 'warn');
+      }
+    } catch (e) {
+      console.warn('Printer scan:', e);
+      const msg = String((e && e.message) || e || '').toLowerCase();
+      if (msg.includes('cancel') || msg.includes('user cancelled')) {
+        notify('Printer scan cancelled', 'warn');
+      } else {
+        notify('No printer found. Check your Bluetooth or Wi-Fi connection', 'warn');
+      }
+    } finally {
+      setTimeout(() => setScanningPrinter(false), 800);
+    }
+  };
 
   const syncConfig = db.syncConfig || { shopId: '', role: '', deviceId: uid(), status: 'active', workers: [] };
 
@@ -494,6 +555,150 @@ export default function Settings({ db, setSettings, clearAll, notify, notifyEven
             </button>
           )}
           <input ref={fileRef} type="file" accept="image/*" hidden onChange={pickFile} />
+        </div>
+      </section>
+
+      {/* ============ Shop Details ============ */}
+      <section>
+        <div className="sec-head">
+          <h2>Shop Details</h2>
+          <span className="muted">Header on all bills &amp; exports</span>
+        </div>
+        <div className="shop-details-form">
+          <div className="field-group">
+            <label>Shop Name</label>
+            <input
+              type="text"
+              placeholder="e.g. Apollo Pharmacy"
+              value={shopName}
+              onChange={(e) => {
+                setShopName(e.target.value);
+                saveShopDetails({ name: e.target.value });
+              }}
+            />
+          </div>
+          <div className="field-group" style={{ marginTop: 10 }}>
+            <label>Contact Phone</label>
+            <input
+              type="tel"
+              placeholder="e.g. +91 98765 43210"
+              value={shopPhone}
+              onChange={(e) => {
+                setShopPhone(e.target.value);
+                saveShopDetails({ phone: e.target.value });
+              }}
+            />
+          </div>
+          <div className="field-group" style={{ marginTop: 10 }}>
+            <label>Location / Address</label>
+            <input
+              type="text"
+              placeholder="e.g. 123 Main Street, City"
+              value={shopAddress}
+              onChange={(e) => {
+                setShopAddress(e.target.value);
+                saveShopDetails({ address: e.target.value });
+              }}
+            />
+          </div>
+          <div className="field-group" style={{ marginTop: 10 }}>
+            <label>Email ID</label>
+            <input
+              type="email"
+              placeholder="e.g. contact@apollopharmacy.com"
+              value={shopEmail}
+              onChange={(e) => {
+                setShopEmail(e.target.value);
+                saveShopDetails({ email: e.target.value });
+              }}
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* ============ Connect to Printer ============ */}
+      <section>
+        <div className="sec-head-col">
+          <div className="sec-head">
+            <h2>Connect to Printer</h2>
+            <span className="muted">Wireless, Bluetooth &amp; Network Printers</span>
+          </div>
+          <span className="notif-sub" style={{ marginTop: 4 }}>
+            <IconPrinter size={15} /> Works with any Bluetooth, Wireless or Network Printer
+          </span>
+        </div>
+
+        <div className="printer-box" style={{ marginTop: 12 }}>
+          <div className="printer-status-bar">
+            <span>
+              <b>Connected Printer</b>
+              <br />
+              <span className="meta">
+                {printerConfig.connectedPrinter
+                  ? `${printerConfig.connectedPrinter.name} (${printerConfig.connectedPrinter.type || 'Connected'})`
+                  : 'No printer connected'}
+              </span>
+            </span>
+            <button className="btn secondary sm" onClick={handleScanPrinters} disabled={scanningPrinter}>
+              <IconBluetooth size={15} /> {scanningPrinter ? 'Scanning...' : 'Scan Nearby'}
+            </button>
+          </div>
+
+          {discoveredPrinters.length > 0 ? (
+            <div className="printer-list" style={{ marginTop: 12 }}>
+              <span className="sub-title" style={{ fontSize: 12, fontWeight: 'bold', color: 'var(--muted)' }}>
+                Available &amp; Paired Printers
+              </span>
+              {discoveredPrinters.map((p) => {
+                const isSelected = printerConfig.connectedPrinter && printerConfig.connectedPrinter.id === p.id;
+                return (
+                  <div
+                    key={p.id}
+                    className={`printer-item ${isSelected ? 'active' : ''}`}
+                    onClick={() => {
+                      setSettings({
+                        printerConfig: {
+                          ...printerConfig,
+                          connectedPrinter: p
+                        }
+                      });
+                      notify(`Selected ${p.name}`);
+                    }}
+                  >
+                    <IconPrinter size={18} />
+                    <div className="printer-info">
+                      <b>{p.name}</b>
+                      <span className="meta">{p.type || 'Printer'}</span>
+                    </div>
+                    {isSelected && <span className="badge-on">Connected</span>}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="printer-empty" style={{ textAlign: 'center', padding: '16px 8px', color: 'var(--muted)', fontSize: 12, marginTop: 10 }}>
+              <IconPrinter size={28} style={{ opacity: 0.5, marginBottom: 4 }} />
+              <p style={{ margin: 0, fontWeight: 600 }}>No printer connected</p>
+              <p style={{ margin: '4px 0 0', fontSize: 11, opacity: 0.8 }}>Make sure your printer is turned on and connected via Bluetooth or Wi-Fi.</p>
+            </div>
+          )}
+
+          <div style={{ marginTop: 14 }}>
+            <button
+              className="btn secondary big"
+              style={{ width: '100%' }}
+              onClick={() => {
+                printTestReceipt(db.settings);
+                if (printerConfig.connectedPrinter) {
+                  notify('Printing test receipt... 🖨️');
+                } else {
+                  notify('Not connected to a printer 🖨️', 'warn');
+                }
+              }}
+            >
+              <IconPrinter size={18} /> Print Test Receipt
+            </button>
+          </div>
         </div>
       </section>
 

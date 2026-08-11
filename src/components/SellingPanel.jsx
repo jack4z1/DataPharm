@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { registerBack } from '../lib/back.js';
-import { IconChevronDown, IconChevronUp, IconMinus, IconPlus, IconTrash, IconX, IconQr, IconCheck, IconUser } from './Icons.jsx';
+import { IconChevronDown, IconChevronUp, IconMinus, IconPlus, IconTrash, IconX, IconQr, IconCheck, IconUser, IconPrinter, IconShare, IconDoc, IconTable, IconCode } from './Icons.jsx';
 import { lineTotal, unitPrice, round2, money } from '../lib/pricing.js';
+import { isRealPrinter } from '../lib/store.js';
+import { printSaleReceipt } from '../lib/print.js';
+import { buildSingleSalePdf, buildSingleSaleDocx, buildSingleSaleCsv, buildSingleSaleJson, deliver } from '../lib/export.js';
+import Sheet from './Sheet.jsx';
 
 const CATEGORY_UNITS = {
   'Tablet':    { stock: 'In stock (strips)',   unit2: 'Tablets / strip',   price: 'Price / strip',  field1: 'strips', field2: 'tabletsPerStrip' },
@@ -75,7 +79,70 @@ export default function SellingPanel({
   const subtotal = round2(selected.reduce((s, x) => s + lineTotal(x, x.qty, x.unit), 0));
   const discPct = Math.min(Math.max(parseFloat(discount) || 0, 0), 100);
   const discAmt = round2((subtotal * discPct) / 100);
-  const total = round2(subtotal - discAmt);
+  const total = Math.max(0, round2(subtotal - discAmt));
+
+  const [sharePending, setSharePending] = useState(false);
+  const [shareBusy, setShareBusy] = useState(null);
+
+  const buildCartSaleObj = () => ({
+    ts: Date.now(),
+    items: selected.map((x) => ({
+      id: x.id,
+      name: x.name,
+      qty: x.qty,
+      unit: x.unit,
+      unitPrice: unitPrice(x, x.unit),
+      line: lineTotal(x, x.qty, x.unit),
+    })),
+    subtotal,
+    discount: discAmt,
+    discountPct: parseFloat(discount) || 0,
+    total,
+    buyer,
+  });
+
+  const handlePrintBill = () => {
+    const saleObj = buildCartSaleObj();
+    printSaleReceipt(saleObj, settings);
+    const conn = settings.printerConfig?.connectedPrinter;
+    const connected = isRealPrinter(conn) ? conn : null;
+    if (connected) {
+      notify(`Printing bill... 🖨️`);
+    } else {
+      notify('Not connected to a printer 🖨️', 'warn');
+    }
+  };
+
+  const runShareBill = async (kind) => {
+    setShareBusy(kind);
+    try {
+      const saleObj = buildCartSaleObj();
+      const stamp = new Date().toISOString().slice(0, 10);
+      let blob, file;
+      if (kind === 'pdf') {
+        blob = buildSingleSalePdf(saleObj, settings);
+        file = `bill-${stamp}.pdf`;
+      } else if (kind === 'docx') {
+        blob = await buildSingleSaleDocx(saleObj, settings);
+        file = `bill-${stamp}.docx`;
+      } else if (kind === 'csv') {
+        blob = buildSingleSaleCsv(saleObj, settings);
+        file = `bill-${stamp}.csv`;
+      } else {
+        blob = buildSingleSaleJson(saleObj, settings);
+        file = `bill-${stamp}.json`;
+      }
+      const res = await deliver(blob, file, 'share');
+      if (res === 'shared') notify('Bill shared successfully 📤');
+      else if (res === 'downloaded') notify(`Bill saved as ${file}`);
+    } catch (e) {
+      console.error(e);
+      notify('Could not share bill', 'err');
+    } finally {
+      setShareBusy(null);
+      setSharePending(false);
+    }
+  };
 
   const overstock = selected.filter((x) => {
     const need = x.unit === 'strip' ? x.qty : x.qty / x.tabletsPerStrip;
@@ -352,6 +419,15 @@ export default function SellingPanel({
                 </button>
               </div>
             )}
+            <div className="qr-quick-actions" style={{ display: 'flex', gap: 8, justifyContent: 'center', margin: '10px 0' }}>
+              <button className="btn secondary sm" onClick={handlePrintBill}>
+                <IconPrinter size={15} /> Print Bill
+              </button>
+              <button className="btn secondary sm" onClick={() => setSharePending(true)}>
+                <IconShare size={15} /> Share Bill
+              </button>
+            </div>
+
             <p className="muted center">
               {confirmPaid
                 ? 'Tap Confirm to record this sale.'
@@ -374,6 +450,26 @@ export default function SellingPanel({
           </div>
         </div>
       )}
+
+      <Sheet open={sharePending} onClose={() => setSharePending(false)} title="Share bill receipt">
+        <div className="export-picker" style={{ padding: '8px 0' }}>
+          <p className="picker-file" style={{ marginBottom: 12 }}>Choose format to share with customer:</p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <button className="btn secondary big" onClick={() => runShareBill('pdf')} disabled={!!shareBusy}>
+              <IconDoc size={18} /> PDF
+            </button>
+            <button className="btn secondary big" onClick={() => runShareBill('docx')} disabled={!!shareBusy}>
+              <IconDoc size={18} /> Word
+            </button>
+            <button className="btn secondary big" onClick={() => runShareBill('csv')} disabled={!!shareBusy}>
+              <IconTable size={18} /> CSV
+            </button>
+            <button className="btn secondary big" onClick={() => runShareBill('json')} disabled={!!shareBusy}>
+              <IconCode size={18} /> JSON
+            </button>
+          </div>
+        </div>
+      </Sheet>
     </>
   );
 }
